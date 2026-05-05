@@ -1,27 +1,22 @@
 import 'dart:convert';
-import 'dart:io';
-import 'package:path_provider/path_provider.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:shared_preferences/shared_preferences.dart';
 
-/// Local leaderboard service (will be replaced with backend later)
+/// Local leaderboard service using SharedPreferences (works on all platforms)
 class LeaderboardService {
   static const int _maxEntries = 50;
+  static const String _key = 'face_puzzle_leaderboard';
   static List<LeaderboardEntry>? _cache;
-
-  /// Get the leaderboard file path
-  static Future<File> _getFile() async {
-    final dir = await getApplicationDocumentsDirectory();
-    return File('${dir.path}/face_puzzle_leaderboard.json');
-  }
 
   /// Load leaderboard entries
   static Future<List<LeaderboardEntry>> getLeaderboard() async {
     if (_cache != null) return _cache!;
 
     try {
-      final file = await _getFile();
-      if (!await file.exists()) return [];
+      final prefs = await SharedPreferences.getInstance();
+      final json = prefs.getString(_key);
+      if (json == null) return [];
 
-      final json = await file.readAsString();
       final list = jsonDecode(json) as List;
       _cache = list
           .map((e) => LeaderboardEntry.fromJson(e as Map<String, dynamic>))
@@ -48,15 +43,13 @@ class LeaderboardService {
     entries.add(entry);
     entries.sort((a, b) => b.score.compareTo(a.score));
 
-    // Keep only top entries
     final trimmed = entries.take(_maxEntries).toList();
     _cache = trimmed;
 
-    // Save
-    final file = await _getFile();
-    await file.writeAsString(jsonEncode(trimmed.map((e) => e.toJson()).toList()));
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+        _key, jsonEncode(trimmed.map((e) => e.toJson()).toList()));
 
-    // Return rank (1-based)
     return trimmed.indexOf(entry) + 1;
   }
 
@@ -74,11 +67,9 @@ class LeaderboardService {
     return entries.take(n).toList();
   }
 
-  /// Clear cache (for testing)
   static void clearCache() => _cache = null;
 }
 
-/// A single leaderboard entry
 class LeaderboardEntry {
   final String playerName;
   final double score;

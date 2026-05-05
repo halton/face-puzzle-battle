@@ -1,5 +1,6 @@
-import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:flame/game.dart';
@@ -303,7 +304,8 @@ class _GameScreenState extends State<GameScreen> {
 
     try {
       final xFile = await _cameraController!.takePicture();
-      await _processImage(File(xFile.path));
+      final bytes = await xFile.readAsBytes();
+      await _processImageBytes(bytes, xFile.path);
     } catch (e) {
       setState(() => _phase = GamePhase.capture);
       if (mounted) {
@@ -326,21 +328,24 @@ class _GameScreenState extends State<GameScreen> {
     _startGameWithDemo();
   }
 
-  Future<void> _processImage(File imageFile) async {
+  Future<void> _processImageBytes(Uint8List bytes, String path) async {
     try {
-      final bytes = await imageFile.readAsBytes();
       final sourceImage = img.decodeImage(bytes);
       if (sourceImage == null) throw Exception('Failed to decode image');
 
-      final inputImage = InputImage.fromFilePath(imageFile.path);
-      final result = await _extractionService.extractFeatures(inputImage, sourceImage);
+      if (kIsWeb) {
+        // On web, use bytes directly (InputImage.fromFilePath not supported)
+        // TODO: Use MediaPipe Face Mesh for web
+        _startGameWithDemo();
+      } else {
+        final inputImage = InputImage.fromFilePath(path);
+        final result = await _extractionService.extractFeatures(inputImage, sourceImage);
 
-      if (result == null || result.features.isEmpty) {
-        throw Exception('未检测到人脸');
+        if (result == null || result.features.isEmpty) {
+          throw Exception('未检测到人脸');
+        }
+        _startGameWithDemo();
       }
-
-      // TODO: Convert extracted features to game sprites
-      _startGameWithDemo();
     } catch (e) {
       setState(() => _phase = GamePhase.capture);
       if (mounted) {
