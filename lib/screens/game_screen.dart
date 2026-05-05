@@ -8,6 +8,7 @@ import 'package:image/image.dart' as img;
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import '../game/face_puzzle_game_widget.dart';
 import '../services/blink_detection_service.dart';
+import '../services/blink_detection_service_web.dart';
 import '../services/face_extraction_service.dart';
 
 class GameScreen extends StatefulWidget {
@@ -21,8 +22,9 @@ enum GamePhase { capture, processing, playing, finished }
 
 class _GameScreenState extends State<GameScreen> {
   GamePhase _phase = GamePhase.capture;
-  final BlinkDetectionService _blinkService = BlinkDetectionService();
-  final FaceExtractionService _extractionService = FaceExtractionService();
+  final BlinkDetectionServiceWeb _blinkServiceWeb = BlinkDetectionServiceWeb();
+  BlinkDetectionService? _blinkServiceNative;
+  FaceExtractionService? _extractionService;
   FacePuzzleGameWidget? _game;
 
   CameraController? _cameraController;
@@ -36,18 +38,30 @@ class _GameScreenState extends State<GameScreen> {
   @override
   void initState() {
     super.initState();
+    if (!kIsWeb) {
+      _blinkServiceNative = BlinkDetectionService();
+      _extractionService = FaceExtractionService();
+    }
     _initCamera();
   }
 
   Future<void> _initCamera() async {
-    _cameraController = await _blinkService.initializeCamera();
+    if (kIsWeb) {
+      _cameraController = await _blinkServiceWeb.initializeCamera();
+    } else {
+      _cameraController = await _blinkServiceNative!.initializeCamera();
+    }
     if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
-    _blinkService.dispose();
-    _extractionService.dispose();
+    if (kIsWeb) {
+      _blinkServiceWeb.dispose();
+    } else {
+      _blinkServiceNative?.dispose();
+    }
+    if (!kIsWeb) _extractionService?.dispose();
     _cameraController?.dispose();
     super.dispose();
   }
@@ -182,7 +196,9 @@ class _GameScreenState extends State<GameScreen> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  '当前: $_currentFeatureName — 眨眼停住！',
+                  kIsWeb
+                      ? '当前: $_currentFeatureName — 点击屏幕停住！'
+                      : '当前: $_currentFeatureName — 眨眼停住！',
                   style: const TextStyle(color: Colors.white70, fontSize: 14),
                 ),
               ),
@@ -194,19 +210,22 @@ class _GameScreenState extends State<GameScreen> {
           ),
         ),
 
-        // Flame game
+        // Flame game (tap to "blink" on web)
         Expanded(
-          child: Container(
-            margin: const EdgeInsets.symmetric(horizontal: 8),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.white10),
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: _game != null
-                  ? GameWidget(game: _game!)
-                  : const SizedBox.shrink(),
+          child: GestureDetector(
+            onTap: kIsWeb ? () => _blinkServiceWeb.triggerBlink() : null,
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 8),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.white10),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: _game != null
+                    ? GameWidget(game: _game!)
+                    : const SizedBox.shrink(),
+              ),
             ),
           ),
         ),
@@ -339,7 +358,7 @@ class _GameScreenState extends State<GameScreen> {
         _startGameWithDemo();
       } else {
         final inputImage = InputImage.fromFilePath(path);
-        final result = await _extractionService.extractFeatures(inputImage, sourceImage);
+        final result = await _extractionService!.extractFeatures(inputImage, sourceImage);
 
         if (result == null || result.features.isEmpty) {
           throw Exception('未检测到人脸');
@@ -382,15 +401,22 @@ class _GameScreenState extends State<GameScreen> {
       });
     };
 
-    // Start blink detection
-    _blinkService.onBlink = () {
+    // Start blink detection (or tap-based on web)
+    void handleBlink() {
       _game?.placeCurrentFeature();
       setState(() => _blinkIndicator = true);
       Future.delayed(const Duration(milliseconds: 300), () {
         if (mounted) setState(() => _blinkIndicator = false);
       });
-    };
-    _blinkService.startDetection();
+    }
+
+    if (kIsWeb) {
+      _blinkServiceWeb.onBlink = handleBlink;
+      _blinkServiceWeb.startDetection();
+    } else {
+      _blinkServiceNative!.onBlink = handleBlink;
+      _blinkServiceNative!.startDetection();
+    }
 
     setState(() => _phase = GamePhase.playing);
 
